@@ -6,6 +6,7 @@ const assert = require('chai').assert;
 const prettyJson = require('./test-utils/prettyJson');
 const sinon = require('sinon');
 
+// const moxandriaFactory = require('../dist/moxandria.js');
 const moxandriaFactory = require('../index.js');
 
 describe('Moxandria core', function () {
@@ -18,6 +19,7 @@ describe('Moxandria core', function () {
 
     it('should be configurable at factory call time, ignoring invalid properties', function () {
         let config = {
+            cwd: 'test/mockFixtures',
             mockPaths: ['test/mocks'],
             foo: 'bar'
         };
@@ -34,7 +36,12 @@ describe('Moxandria core', function () {
         let sideloadMockFactory;
 
         beforeEach(function () {
-            moxandria = moxandriaFactory();
+            let config = {
+                cwd: 'test/mock-fixtures',
+                mockPaths: ['']
+            };
+
+            moxandria = moxandriaFactory(config);
 
             sideloadMockFactory = function (mockApi) {
                 return {
@@ -82,6 +89,12 @@ describe('Moxandria core', function () {
             testMock.testEndpoint1([], callbackSpy);
 
             this.verify(prettyJson(callbackSpy.args));
+        });
+
+        it('should load mock from file system if not pre-loaded', function () {
+            let filesystemTestMock = moxandria.buildMock('filesystemTestMock');
+            filesystemTestMock.fsTestMock1EnqueueData([null, 'something']);
+            this.verify(prettyJson(filesystemTestMock));
         });
 
     });

@@ -7,13 +7,14 @@ function moxandriaFactory(
     'use strict';
 
     return function moxandriaFactory(userConfig) {
-        var mockRegistry = registryFactory();
-
         var cleanConfig = helpers.sanitizeObject(userConfig);
 
         var config = {
+            cwd: cleanConfig.cwd,
             mockPaths: cleanConfig.mockPaths
         }
+
+        var mockRegistry = registryFactory(config);
 
         function getConfig() {
             return helpers.copyObjectProperties(config);

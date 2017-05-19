@@ -1,0 +1,6 @@
+{
+    "fsTestMock1": "Function: proxy",
+    "fsTestMock2": "Function: proxy",
+    "fsTestMock1EnqueueData": "Function: anonymous function",
+    "fsTestMock2EnqueueData": "Function: anonymous function"
+}

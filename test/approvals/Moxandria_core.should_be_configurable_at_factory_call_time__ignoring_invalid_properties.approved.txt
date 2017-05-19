@@ -1,4 +1,5 @@
 {
+    "cwd": "test/mockFixtures",
     "mockPaths": [
         "test/mocks"
     ]

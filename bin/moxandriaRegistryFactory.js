@@ -1,30 +1,49 @@
-function registryFactory() {
-    var registeredMocks = {};
+function mockRegistryFactory(mockLoader) {
+    'use strict';
+    
+    return function registryFactory(config) {
+        var registeredMocks = {};
 
-    function registerMock(mockName, mockFactory) {
-        if (typeof registeredMocks[mockName] !== 'undefined') {
-            throw new Error('A mock is already registered by the name ' + mockFactory);
+        function registerMock(mockName, mockFactory) {
+            if (typeof registeredMocks[mockName] !== 'undefined') {
+                throw new Error('A mock is already registered by the name ' + mockFactory);
+            }
+
+            registeredMocks[mockName] = mockFactory;
         }
 
-        registeredMocks[mockName] = mockFactory;
-    }
+        function loadAndRegsiter(mockName) {
+            var loadedMock = mockLoader.loadFromFs(mockName, config);
 
-    function getMock(mockName) {
-        var registeredMock = registeredMocks[mockName];
+            if(loadedMock !== null) {
+                registerMock(mockName, loadedMock);
+            }
 
-        if (typeof registeredMock === 'undefined') {
-            throw new Error('No mock registered named ' + mockName);
+            return loadedMock;
         }
 
-        return registeredMock;
+        function getMock(mockName) {
+            var registeredMock = registeredMocks[mockName];
+
+            if(typeof registeredMock === 'undefined') {
+                registeredMock = loadAndRegsiter(mockName);
+            }
+
+            if (registeredMock === null) {
+                throw new Error('No mock registered named ' + mockName);
+            }
+
+            return registeredMock;
+        }
+
+        return {
+            registerMock: registerMock,
+            getMock: getMock
+        };
     }
 
-    return {
-        registerMock: registerMock,
-        getMock: getMock
-    };
 }
 
-if(typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
-    module.exports = registryFactory;
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+    module.exports = mockRegistryFactory;
 }
