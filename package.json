@@ -1,0 +1,41 @@
+{
+  "name": "moxandria",
+  "version": "1.0.0",
+  "description": "A clean, simple mock centralization and facilitation library for Javascript testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "gulp test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cmstead/moxandria.git"
+  },
+  "keywords": [
+    "mocks",
+    "mocking",
+    "testing",
+    "test-utilities"
+  ],
+  "author": "Chris Stead",
+  "license": "MPL-2.0",
+  "bugs": {
+    "url": "https://github.com/cmstead/moxandria/issues"
+  },
+  "homepage": "https://github.com/cmstead/moxandria#readme",
+  "dependencies": {
+    "signet": "^2.0.3",
+    "sinon": "^2.2.0"
+  },
+  "devDependencies": {
+    "approvals": "^2.1.2",
+    "chai": "^3.5.0",
+    "eslint": "^3.19.0",
+    "flow-bin": "^0.46.0",
+    "gulp": "^3.9.1",
+    "gulp-eslint": "^3.0.1",
+    "gulp-flowtype": "^1.0.0",
+    "gulp-istanbul": "^1.1.1",
+    "gulp-mocha": "^3.0.1",
+    "mocha": "^3.4.1"
+  }
+}

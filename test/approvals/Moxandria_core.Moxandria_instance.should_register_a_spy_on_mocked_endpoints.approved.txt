@@ -1,0 +1,21 @@
+Test Endpoint 1 args: 
+[
+    [
+        [
+            1,
+            2
+        ],
+        "Function: anonymous function"
+    ]
+]
+
+Test Endpoint 2 args: 
+[
+    [
+        [
+            3,
+            4
+        ],
+        "Function: anonymous function"
+    ]
+]

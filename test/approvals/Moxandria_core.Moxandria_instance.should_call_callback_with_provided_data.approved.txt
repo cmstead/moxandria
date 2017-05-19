@@ -1,0 +1,12 @@
+[
+    [
+        null,
+        "something"
+    ],
+    [
+        {
+            "message": "bad stuff happened"
+        },
+        null
+    ]
+]
