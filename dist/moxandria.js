@@ -27,8 +27,13 @@ var signetAssembler = (function () {
         return prependTypeName(typeDef.name, typeStr);
     }
 
+    function buildDependentToken (result, dependent) {
+        var output = result !== '' ? result + ', ' : result;
+        return output + [dependent.left, dependent.operator, dependent.right].join(' ');
+    }
+
     function buildDependentStr (dependent) {
-        return [dependent.left, dependent.operator, dependent.right].join(' ') + ' :: ';
+        return dependent.reduce(buildDependentToken, '') + ' :: ';
     }
 
     function assembleTypeList(typeList) {
@@ -100,6 +105,7 @@ function signetParser() {
     'use strict';
 
     var typeLevelMacros = [];
+    var signatureLevelMacros = [];
 
     function identity(value) {
         return value;
@@ -111,12 +117,12 @@ function signetParser() {
         }
     }
 
-    function applyTypeLeveMacros(typeStr) {
+    function applyMacros(macroSet, typeStr) {
         var result = typeStr;
-        var macroLength = typeLevelMacros.length;
+        var macroLength = macroSet.length;
 
         for (var i = 0; i < macroLength; i++) {
-            result = typeLevelMacros[i](result);
+            result = macroSet[i](result);
             throwOnBadMacroResult(result);
         }
 
@@ -127,13 +133,21 @@ function signetParser() {
         typeLevelMacros.push(macro);
     }
 
+    function registerSignatureLevelMacro(macro) {
+        signatureLevelMacros.push(macro);
+    }
+
+    function isDelimiter(symbol) {
+        return symbol === ';' || symbol === ',';
+    }
+
     function terminateSubtype(bracketStack, currentChar) {
-        return (bracketStack.length === 1 && currentChar === ';')
+        return (bracketStack.length === 1 && isDelimiter(currentChar))
             || (currentChar === '>' && bracketStack.length === 0);
     }
 
     function isStructuralChar(char) {
-        return char.match(/[\<\;\s]/) !== null;
+        return char.match(/[\<\;\s\,]/) !== null;
     }
 
     function captureChar(bracketStack, currentChar) {
@@ -172,36 +186,24 @@ function signetParser() {
         }
     }
 
+    function getSubtypeData(typeStr) {
+        var subtypeToken = typeStr.trim().split('<').slice(1).join('<');
+        return subtypeToken.substring(0, subtypeToken.length - 1);
+    }
+
+    function isSubtypeSeparator(value) {
+        return value === ';' || value === ',';
+    }
+
     function parseSubtype(typeStr) {
-        var subtypeStr = '';
-        var subtypeInfo = [];
-        var bracketStack = [];
-
-        var getSubtypeStr = getUpdatedSubtypeStr(bracketStack, buildAppender(bracketStack));
-        var updateSubtypes = updateSubtypeInfo(bracketStack, subtypeInfo);
-
-        var typeStringTokens = typeStr.split('');
-
-        for(var i = 0; i < typeStringTokens.length; i++) {
-            var currentChar = typeStringTokens[i];
-
-            if(currentChar === '%') {
-                i++;
-                subtypeStr += typeStringTokens[i];
-                continue;
-            }
-
-            updateStack(bracketStack, currentChar);
-            updateSubtypes(subtypeStr, currentChar);
-
-            subtypeStr = getSubtypeStr(subtypeStr, currentChar);
-        }
-
-        return subtypeInfo;
+        var optionalPattern = /^\[(.*)\]$/
+        var subtypeData = getSubtypeData(typeStr.trim().replace(optionalPattern, '$1'));
+        return splitOnSymbol(isSubtypeSeparator, subtypeData)
+            .map(function (value) { return value.trim(); });
     }
 
     function parseType(typeStr) {
-        var transformedTypeStr = applyTypeLeveMacros(typeStr);
+        var transformedTypeStr = applyMacros(typeLevelMacros, typeStr);
 
         var typePattern = /^([^:<]+)\:(.+)$/;
         var typeName = transformedTypeStr.replace(typePattern, '$1');
@@ -211,11 +213,11 @@ function signetParser() {
             name: typeName === transformedTypeStr ? null : typeName.trim(),
             type: rawType.split('<')[0].replace(/\[|\]/g, '').trim(),
             subtype: parseSubtype(rawType),
-            optional: rawType.match(/^\[[^\]]+\]$/) !== null
+            optional: rawType.trim().match(/^\[[^\]]+\]$/) !== null
         };
     }
 
-    function parseDependentMetadata(metadataStr) {
+    function parseDependentMetadataToken(metadataStr) {
         var tokens = metadataStr.trim().split(/\s+/g);
 
         return {
@@ -225,25 +227,114 @@ function signetParser() {
         }
     }
 
+    function parseDependentMetadata(metadataStr) {
+        return metadataStr.split(/\,\s*/g).map(parseDependentMetadataToken);
+    }
+
+    function isComma(symbol) {
+        return symbol === ',';
+    }
+
+    function isDoubleColon(symbol) {
+        return symbol === '::';
+    }
+
     function parseParams(token) {
-        var tokenSet = token.split(/\s*\:\:\s*/);
+        var tokenSet = splitOnSymbol(isDoubleColon, token);
         var dependentMetadata = tokenSet.length > 1 ? tokenSet.shift() : null;
-        var typeValues = tokenSet[0].split(/\s*\,\s*/).map(parseType);
+        var typeValues = splitOnSymbol(isComma, tokenSet[0]).map(parseType);
 
         typeValues.dependent = dependentMetadata === null ? null : parseDependentMetadata(dependentMetadata);
 
         return typeValues;
     }
 
-    function parseSignature(signature) {
-        var parameterTokens = signature.split(/\s*\=\>\s*/);
+    function bracketStackFactory() {
+        var stack = [];
 
-        return parameterTokens.map(parseParams);
+        function update(symbol) {
+            if (symbol === '<') {
+                stack.push('<');
+            }
+            if (symbol === '>') {
+                stack.pop();
+            }
+            if (symbol === '::') {
+                stack.length = 0;
+            }
+        }
+
+        return {
+            update: update,
+            get length() {
+                return stack.length;
+            }
+        };
+    }
+
+    function isSequenceChar(symbol) {
+        return symbol === '=' ||
+            symbol === '%' ||
+            symbol === ':';
+    }
+
+    function isSpecialSquence(symbol) {
+        return symbol[0] === '%' ||
+            symbol === '=>' ||
+            symbol === '::';
+    }
+
+    function splitOnSymbol(isSplitSymbol, signature) {
+        var tokens = [];
+        var currentToken = '';
+        var currentSymbol = '';
+        var bracketStack = bracketStackFactory();
+
+        for (var i = 0; i < signature.length; i++) {
+            currentSymbol = signature[i];
+
+            if (bracketStack.length === 0 && currentSymbol === '%') {
+                i++;
+                currentToken += signature[i];
+                continue;
+            }
+            
+            if (isSequenceChar(currentSymbol) && isSpecialSquence(currentSymbol + signature[i + 1])) {
+                i++;
+                currentSymbol = currentSymbol + signature[i];
+            }
+
+            bracketStack.update(currentSymbol);
+
+            if (isSplitSymbol(currentSymbol) && bracketStack.length === 0) {
+                tokens.push(currentToken);
+                currentToken = '';
+                continue;
+            }
+
+            currentToken += currentSymbol;
+        }
+
+        if (currentToken !== '') {
+            tokens.push(currentToken);
+        }
+
+        return tokens;
+    }
+
+    function isArrow(symbol) {
+        return symbol === '=>';
+    }
+
+    function parseSignature(signature) {
+        var resolvedSignature = applyMacros(signatureLevelMacros, signature);
+        return splitOnSymbol(isArrow, resolvedSignature).map(parseParams);
     }
 
     return {
         parseSignature: parseSignature,
         parseType: parseType,
+        registerSignatureLevelMacro: registerSignatureLevelMacro,
         registerTypeLevelMacro: registerTypeLevelMacro
     };
 }
@@ -559,19 +650,21 @@ var signetValidator = (function () {
             return value;
         }
 
-        function checkDependentTypes(dependent, namedArgs, validationState) {
-            var newValidationState = null;
+        function checkDependentTypes(namedArgs) {
+            return function (dependent, validationState) {
+                var newValidationState = null;
 
-            if (validationState === null && isObjectInstance(dependent)) {
-                var left = namedArgs[dependent.left];
-                var right = getRightArg(namedArgs, dependent.right);
+                if (validationState === null) {
+                    var left = namedArgs[dependent.left];
+                    var right = getRightArg(namedArgs, dependent.right);
 
-                var operatorDef = getDependentOperator(left.typeNode.type, dependent.operator);
+                    var operatorDef = getDependentOperator(left.typeNode.type, dependent.operator);
 
-                newValidationState = getValidationState(left, right, operatorDef);
-            }
+                    newValidationState = getValidationState(left, right, operatorDef);
+                }
 
-            return newValidationState === null ? validationState : newValidationState;
+                return newValidationState === null ? validationState : newValidationState;
+            };
         }
 
         function buildNamedArgs(typeList, argumentList) {
@@ -593,14 +686,25 @@ var signetValidator = (function () {
             return result;
         }
 
+        function arrayOrDefault (value) {
+            var typeOk = Object.prototype.toString.call(value) === '[object Array]';
+            return typeOk ? value : [];
+        }
+
         function validateArguments(typeList) {
-            var dependent = typeList.dependent;
+            var dependentExpressions = arrayOrDefault(typeList.dependent);
 
             return function (argumentList) {
                 var namedArgs = buildNamedArgs(typeList, argumentList);
                 var validationState = typeList.length === 0 ? null : validateCurrentValue(typeList, argumentList);
 
-                return checkDependentTypes(dependent, namedArgs, validationState);
+                var checkDependentType = checkDependentTypes(namedArgs);
+
+                dependentExpressions.forEach(function (dependent) {
+                    validationState = checkDependentType(dependent, validationState);
+                });
+
+                return validationState;
             };
         }
 
@@ -616,7 +720,7 @@ if (typeof module !== 'undefined' && typeof module.exports !== undefined) {
     module.exports = signetValidator;
 }
 
-function signetDuckTypes(typelog, isTypeOf, getTypeName) {
+function signetDuckTypes(typelog, isTypeOf) {
 
     var duckTypeErrorReporters = {};
 
@@ -633,14 +737,27 @@ function signetDuckTypes(typelog, isTypeOf, getTypeName) {
         });
     }
 
+    function getErrorValue(value, typeName) {
+        if(typeof duckTypeErrorReporters[typeName] === 'function') {
+            return duckTypeErrorReporters[typeName](value);
+        }
+
+        return value;
+    }
+
+    function getTypeName(objectDef, key) {
+        return typeof objectDef[key] === 'string' ? objectDef[key] : objectDef[key].name;
+    }
+
     function buildDuckTypeErrorReporter(definitionPairs, objectDef) {
         return function (value) {
             return definitionPairs.reduce(function (result, typePair) {
                 var key = typePair[0];
                 var typePredicate = typePair[1];
+                var typeName = getTypeName(objectDef, key);
 
                 if (!typePredicate(value[key])) {
-                    result.push([key, getTypeName(objectDef, key), value[key]]);
+                    result.push([key, typeName, getErrorValue(value[key], typeName)]);
                 }
 
                 return result;
@@ -689,206 +806,16 @@ if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
 }
 
 
-function signetBuilder(
-    typelog,
-    validator,
-    checker,
+function signetCoreTypes(
     parser,
-    assembler,
-    duckTypes) {
-
+    extend,
+    isTypeOf,
+    isSignetType,
+    isSignetSubtypeOf,
+    subtype,
+    alias,
+    defineDependentOperatorOn) {
     'use strict';
-
-    var duckTypesModule = duckTypes(typelog, isTypeOf, getTypeName);
-
-    function alias(key, typeStr) {
-        var typeDef = parser.parseType(typeStr);
-        var checkType = typelog.isTypeOf(typeDef);
-
-        typelog.defineSubtypeOf(typeDef.type)(key, function (value) {
-            return checkType(value);
-        });
-    }
-
-    function isTypeOf(typeValue) {
-        return typeof typeValue === 'string' ?
-            typelog.isTypeOf(parser.parseType(typeValue)) :
-            typeValue;
-    }
-
-    function addImmutableProperty(obj, key, value) {
-        Object.defineProperty(obj, key, {
-            value: value,
-            writeable: false
-        });
-
-        return obj;
-    }
-
-    function attachSignatureAssembler(fn, signatureTree) {
-        addImmutableProperty(fn, 'signatureTree', signatureTree);
-
-        Object.defineProperty(fn, 'signature', {
-            writeable: false,
-            get: function () {
-                return assembler.assembleSignature(fn.signatureTree);
-            }
-        });
-
-        return fn;
-    }
-
-    function throwOnSignatureError(signatureTree, fn) {
-        var signatureCheckResult = checker.checkSignature(signatureTree);
-        var lastIndex = signatureTree.length - 1;
-
-        if (signatureTree.length < 2) {
-            throw new SyntaxError('Signature must have both input and output types');
-        }
-
-        if (signatureTree[0].length < fn.length) {
-            throw new Error('Signature declaration too short for function with ' + fn.length + ' arguments.');
-        }
-
-        if (signatureTree[lastIndex].length > 1) {
-            throw new SyntaxError('Signature can only have a single output type');
-        }
-
-        if (signatureCheckResult !== null) {
-            var invalidTypes = signatureCheckResult.map(assembler.assembleType);
-            throw new TypeError("Signature contains invalid types: " + invalidTypes.join(', '));
-        }
-    }
-
-    function signFn(signatureTree, fn) {
-        attachSignatureAssembler(fn, signatureTree);
-        return addImmutableProperty(fn, 'signatureTree', signatureTree);
-    }
-
-    function sign(signature, fn) {
-        var signatureTree = parser.parseSignature(signature);
-
-        throwOnSignatureError(signatureTree, fn);
-
-        return signFn(signatureTree, fn);
-    }
-
-    function last(list) {
-        return list[list.length - 1];
-    }
-
-    function throwEvaluationError(valueInfo, prefixMixin) {
-        var valueType = typeof valueInfo[1];
-
-        var errorMessage = 'Expected a ' + prefixMixin + 'value of type ' +
-            valueInfo[0] + ' but got ' +
-            valueInfo[1] + ' of type ' + valueType;
-
-        throw new TypeError(errorMessage);
-    }
-
-    var functionTypeDef = parser.parseType('function');
-
-    function verify(fn, args) {
-        var result = validator.validateArguments(fn.signatureTree[0])(args);
-
-        if (result !== null) {
-            throwEvaluationError(result, '');
-        }
-    }
-
-    function throwInputError(validationResult, inputErrorBuilder, args, signatureTree) {
-        if (typeof inputErrorBuilder === 'function') {
-            throw new Error(inputErrorBuilder(validationResult, args, signatureTree));
-        } else {
-            throwEvaluationError(validationResult, '');
-        }
-    }
-
-    function throwOutputError(validationResult, outputErrorBuilder, args, signatureTree) {
-        if (typeof outputErrorBuilder === 'function') {
-            throw new Error(outputErrorBuilder(validationResult, args, signatureTree));
-        } else {
-            throwEvaluationError(validationResult, 'return ');
-        }
-    }
-
-    function buildEnforcer(signatureTree, fn, options) {
-        return function () {
-            var args = Array.prototype.slice.call(arguments, 0);
-            var validationResult = validator.validateArguments(signatureTree[0])(args);
-
-            if (validationResult !== null) {
-                throwInputError(validationResult, options.inputErrorBuilder, args, signatureTree);
-            }
-
-            var signatureIsCurried = signatureTree.length > 2;
-            var returnType = !signatureIsCurried ? last(signatureTree)[0] : functionTypeDef;
-            var returnTypeStr = assembler.assembleType(returnType);
-
-            var result = fn.apply(null, args);
-
-            if (!validator.validateType(returnType)(result)) {
-                throwOutputError([returnTypeStr, result], options.outputErrorBuilder, args, signatureTree);
-            }
-
-            return !signatureIsCurried ? result : enforceOnTree(signatureTree.slice(1), result, options);
-        }
-    }
-
-    function buildArgNames(argCount) {
-        var startChar = 'a'.charCodeAt(0);
-        var argNames = [];
-
-        for (var i = 0; i < argCount; i++) {
-            argNames.push(String.fromCharCode(startChar + i));
-        }
-
-        return argNames.join(', ');
-    }
-
-    function buildEnforceDecorator(enforcer) {
-        return function (args) {
-            return enforcer.apply(null, Array.prototype.slice.call(arguments, 0));
-        }
-    }
-
-    function enforceOnTree(signatureTree, fn, options) {
-        var enforcer = buildEnforcer(signatureTree, fn, options);
-        var argNames = buildArgNames(fn.length);
-        var enforceDecorator = buildEnforceDecorator(enforcer);
-
-        enforceDecorator.toString = Function.prototype.toString.bind(fn);
-
-        return signFn(signatureTree, enforceDecorator);
-    }
-
-    function addTypeCheck(typeDef) {
-        typeDef.typeCheck = typelog.isTypeOf(typeDef);
-        return typeDef;
-    }
-
-    function prepareSubtree(subtree) {
-        var updatedSubtree = subtree.map(addTypeCheck);
-        updatedSubtree.dependent = subtree.dependent;
-        return updatedSubtree;
-    }
-
-    function prepareSignature(signatureTree) {
-        return signatureTree.map(prepareSubtree);
-    }
-
-    function enforce(signature, fn, options) {
-        var signatureTree = prepareSignature(parser.parseSignature(signature));
-        var cleanOptions = typeof options === 'object' && options !== null ? options : {};
-        return enforceOnTree(signatureTree, fn, cleanOptions);
-    }
-
-    function getTypeName(objectDef, key) {
-        return typeof objectDef[key] === 'string' ? objectDef[key] : objectDef[key].name;
-    }
-
-    /* Defining canned types */
 
     function not(pred) {
         return function (a, b) {
@@ -958,7 +885,7 @@ function signetBuilder(
         var aTypeName = getVariantType(a, aType);
         var bTypeName = getVariantType(b, bType);
 
-        return typelog.isSubtypeOf(bTypeName)(aTypeName);
+        return isSignetSubtypeOf(bTypeName)(aTypeName);
     }
 
     function isSupertypeOf(a, b, aType, bType) {
@@ -1011,8 +938,6 @@ function signetBuilder(
             return range.min <= value && value <= range.max;
         }
 
-        checkRange.preprocess = optionsToRangeObject;
-
         return checkRange;
     }
 
@@ -1023,47 +948,17 @@ function signetBuilder(
         };
     }
 
-    function leftBoundedBuilder() {
-        function checkLeftBound(value, bound) {
-            return value >= bound;
-        }
-
-        checkLeftBound.preprocess = optionsToBound;
-
-        return checkLeftBound;
-    }
-
-    function rightBoundedBuilder() {
-        function checkRightBound(value, bound) {
-            return value <= bound;
-        }
-
-        checkRightBound.preprocess = optionsToBound;
-
-        return checkRightBound;
-    }
-
-    function optionsToBound(options) {
-        return Number(options[0]);
-    }
-
-    var inRange = rangeBuilder();
-
     function checkBoundedString(value, range) {
-        return inRange(value.length, range);
+        return range.min <= value.length && value.length <= range.max;
     }
-
-    checkBoundedString.preprocess = optionsToRangeObject;
 
     function optionsToRegex(options) {
-        return RegExp(options.join(';'));
+        return options.length === 1 ? options[0] : options.join(';');
     }
 
     function checkFormattedString(value, regex) {
         return value.match(regex) !== null;
     }
-
-    checkFormattedString.preprocess = optionsToRegex;
 
     function optionsToFunctions(options) {
         return options.map(isTypeOf);
@@ -1079,7 +974,7 @@ function signetBuilder(
 
     function compareTypes(typeA, typeB) {
         var result = typeA === typeB ? 1 : 0;
-        return typelog.isSubtypeOf(typeA)(typeB) ? -1 : result;
+        return isSignetSubtypeOf(typeA)(typeB) ? -1 : result;
     }
 
     function insertTypeName(typeNameArray, typeName) {
@@ -1140,8 +1035,6 @@ function signetBuilder(
         }
     }
 
-    checkTuple.preprocess = optionsToFunctions;
-
     function isVariant(value, options) {
         return options.length === 0 || options.filter(checkValueType).length > 0;
 
@@ -1150,105 +1043,410 @@ function signetBuilder(
         }
     }
 
-    isVariant.preprocess = optionsToFunctions;
-
     function checkTaggedUnion(value, options) {
         console.warn('Tagged Union is deprecated, use variant instead.');
         return isVariant(value, options);
     }
 
-    checkTaggedUnion.preprocess = optionsToFunctions;
-
     var starTypeDef = parser.parseType('*');
 
-    parser.registerTypeLevelMacro(function emptyParamsToStar(value) {
-        return /^\(\s*\)$/.test(value) ? '*' : value;
-    });
-
-    typelog.define('boolean', isType('boolean'));
-    typelog.define('function', isType('function'));
-    typelog.define('number', isType('number'));
-    typelog.define('object', isType('object'));
-    typelog.define('string', isType('string'));
-    typelog.define('symbol', isType('symbol'));
-    typelog.define('undefined', isType('undefined'));
-    typelog.define('null', isNull);
-    typelog.define('variant', isVariant);
-    typelog.define('taggedUnion', checkTaggedUnion);
-
-    var isTypeBaseType = isTypeOf('variant<string; function>');
-
-    function verifyTypeType(value) {
-        var typeValueOk = isTypeBaseType(value);
-
-        if (typeValueOk && typeof value === 'string') {
-            var parsedType = parser.parseType(value);
-            typeValueOk = typelog.isType(parsedType.type);
-        }
-
-        return typeValueOk;
+    function isRegisteredType(value) {
+        return typeof value === 'function' || isSignetType(parser.parseType(value).type);
     }
 
-    typelog.define('type', verifyTypeType);
 
-    typelog.defineSubtypeOf('object')('array', checkArray);
-    typelog.defineSubtypeOf('object')('regexp', isRegExp);
-    typelog.defineSubtypeOf('number')('int', checkInt);
-    typelog.defineSubtypeOf('number')('bounded', rangeBuilder());
-    typelog.defineSubtypeOf('number')('leftBounded', leftBoundedBuilder());
-    typelog.defineSubtypeOf('number')('rightBounded', rightBoundedBuilder());
-    typelog.defineSubtypeOf('int')('boundedInt', rangeBuilder());
-    typelog.defineSubtypeOf('int')('leftBoundedInt', leftBoundedBuilder());
-    typelog.defineSubtypeOf('int')('rightBoundedInt', rightBoundedBuilder());
-    typelog.defineSubtypeOf('string')('boundedString', checkBoundedString);
-    typelog.defineSubtypeOf('string')('formattedString', checkFormattedString);
-    typelog.defineSubtypeOf('array')('tuple', checkTuple);
-    typelog.defineSubtypeOf('array')('unorderedProduct', isUnorderedProduct);
-    typelog.defineSubtypeOf('object')('arguments', checkArgumentsObject);
+    parser.registerTypeLevelMacro(function emptyParamsToStar(value) {
+        return /^\(\s*\)$/.test(value.trim()) ? '*' : value;
+    });
+
+    parser.registerSignatureLevelMacro(function signatureToFunction(value) {
+        var signaturePattern = /(\()((.*\=\>)+(.*))(\))/
+        var signatureMatch = signaturePattern.test(value);
+
+        return signatureMatch ? value.replace(signaturePattern, 'function<$2>') : value;
+    });
+
+    extend('boolean', isType('boolean'));
+    extend('function', isType('function'));
+    extend('number', isType('number'));
+    extend('object', isType('object'));
+    extend('string', isType('string'));
+    extend('symbol', isType('symbol'));
+    extend('undefined', isType('undefined'));
+    extend('null', isNull);
+    extend('variant', isVariant, optionsToFunctions);
+    extend('taggedUnion', checkTaggedUnion, optionsToFunctions);
+
+    subtype('object')('array', checkArray);
+    subtype('object')('regexp', isRegExp);
+    subtype('number')('int', checkInt);
+    subtype('number')('bounded', rangeBuilder(), optionsToRangeObject);
+    subtype('int')('boundedInt', rangeBuilder(), optionsToRangeObject);
+    subtype('string')('boundedString', checkBoundedString, optionsToRangeObject);
+    subtype('string')('formattedString', checkFormattedString, optionsToRegex);
+    subtype('array')('tuple', checkTuple, optionsToFunctions);
+    subtype('array')('unorderedProduct', isUnorderedProduct);
+    subtype('object')('arguments', checkArgumentsObject);
+
+    alias('typeValue', 'variant<string, function>');
+    subtype('typeValue')('type', isRegisteredType);
 
     alias('any', '*');
     alias('void', '*');
 
-    typelog.defineDependentOperatorOn('number')('>', greater);
-    typelog.defineDependentOperatorOn('number')('<', less);
-    typelog.defineDependentOperatorOn('number')('=', equal);
-    typelog.defineDependentOperatorOn('number')('>=', not(less));
-    typelog.defineDependentOperatorOn('number')('<=', not(greater));
-    typelog.defineDependentOperatorOn('number')('!=', not(equal));
+    alias('leftBounded', 'bounded<_, Infinity>');
+    alias('rightBounded', 'bounded<-Infinity, _>');
+    
+    alias('leftBoundedInt', 'bounded<_, Infinity>');
+    alias('rightBoundedInt', 'bounded<-Infinity, _>');
 
-    typelog.defineDependentOperatorOn('string')('=', equal);
-    typelog.defineDependentOperatorOn('string')('!=', not(equal));
+    defineDependentOperatorOn('number')('>', greater);
+    defineDependentOperatorOn('number')('<', less);
+    defineDependentOperatorOn('number')('=', equal);
+    defineDependentOperatorOn('number')('>=', not(less));
+    defineDependentOperatorOn('number')('<=', not(greater));
+    defineDependentOperatorOn('number')('!=', not(equal));
 
-    typelog.defineDependentOperatorOn('object')('=', objectsAreEqual);
-    typelog.defineDependentOperatorOn('object')('!=', not(objectsAreEqual));
-    typelog.defineDependentOperatorOn('object')(':>', propertySuperSet);
-    typelog.defineDependentOperatorOn('object')(':<', propertySubSet);
-    typelog.defineDependentOperatorOn('object')(':=', propertyCongruence);
-    typelog.defineDependentOperatorOn('object')(':!=', not(propertyCongruence));
+    defineDependentOperatorOn('string')('=', equal);
+    defineDependentOperatorOn('string')('!=', not(equal));
 
-    typelog.defineDependentOperatorOn('variant')('isTypeOf', isSameType);
-    typelog.defineDependentOperatorOn('variant')('=:', isSameType);
-    typelog.defineDependentOperatorOn('variant')('<:', isSubtypeOf);
-    typelog.defineDependentOperatorOn('variant')('>:', isSupertypeOf);
+    defineDependentOperatorOn('object')('=', objectsAreEqual);
+    defineDependentOperatorOn('object')('!=', not(objectsAreEqual));
+    defineDependentOperatorOn('object')(':>', propertySuperSet);
+    defineDependentOperatorOn('object')(':<', propertySubSet);
+    defineDependentOperatorOn('object')(':=', propertyCongruence);
+    defineDependentOperatorOn('object')(':!=', not(propertyCongruence));
+
+    defineDependentOperatorOn('variant')('isTypeOf', isSameType);
+    defineDependentOperatorOn('variant')('=:', isSameType);
+    defineDependentOperatorOn('variant')('<:', isSubtypeOf);
+    defineDependentOperatorOn('variant')('>:', isSupertypeOf);
 
     return {
-        alias: enforce('aliasName != typeString :: aliasName:string, typeString:string => undefined', alias),
-        duckTypeFactory: enforce('duckTypeDef:object => function', duckTypesModule.duckTypeFactory),
-        defineDuckType: enforce('typeName:string, duckTypeDef:object => undefined', duckTypesModule.defineDuckType),
-        defineDependentOperatorOn: enforce('typeName:string => operator:string, operatorCheck:function => undefined', typelog.defineDependentOperatorOn),
-        enforce: enforce('signature:string, functionToEnforce:function, options:[object] => function', enforce),
-        extend: enforce('typeName:string, typeCheck:function => undefined', typelog.define),
-        isSubtypeOf: enforce('rootTypeName:string => typeNameUnderTest:string => boolean', typelog.isSubtypeOf),
-        isType: enforce('typeName:string => boolean', typelog.isType),
-        isTypeOf: enforce('typeToCheck:type => value:* => boolean', isTypeOf),
-        registerTypeLevelMacro: enforce('macro:function => undefined', parser.registerTypeLevelMacro),
-        reportDuckTypeErrors: enforce('duckTypeName:string => valueToCheck:object => array<tuple<string; string; *>>', duckTypesModule.reportDuckTypeErrors),
-        sign: enforce('signature:string, functionToSign:function => function', sign),
-        subtype: enforce('rootTypeName:string => subtypeName:string, subtypeCheck:function => undefined', typelog.defineSubtypeOf),
-        typeChain: enforce('typeName:string => string', typelog.getTypeChain),
-        verify: enforce('signedFunctionToVerify:function, functionArguments:arguments => undefined', verify),
-        whichType: enforce('typeNames:array<string> => value:* => variant<string; null>', whichType),
-        whichVariantType: enforce('variantString:string => value:* => variant<string; null>', whichVariantType)
+        whichType: whichType,
+        whichVariantType: whichVariantType
+    };
+
+}
+
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+    module.exports = signetCoreTypes;
+}
+
+function signetBuilder(
+    typelog,
+    validator,
+    checker,
+    parser,
+    assembler,
+    duckTypes,
+    coreTypes) {
+
+    'use strict';
+
+    var duckTypesModule = duckTypes(typelog, isTypeOf);
+    var placeholderPattern = /([<\;\,]\s*)(_)(\s*[>\;\,])/;
+
+    function hasPlaceholder(typeStr) {
+        return placeholderPattern.test(typeStr);
+    }
+
+    function replacePlaceholders(typeStr, typeValues) {
+        return typeValues.reduce(function (result, typeValue) {
+            return result.replace(placeholderPattern, '$1' + typeValue + '$3');
+        }, typeStr);
+    }
+
+    function buildTypeAlias(typeDef) {
+        var checkValue = typelog.isTypeOf(typeDef);
+
+        return function typeCheck(value) {
+            return checkValue(value);
+        };
+    }
+
+    function buildPartialTypeAlias(typeStr) {
+        return function typeCheck(value, typeValues) {
+            var finalTypeStr = replacePlaceholders(typeStr, typeValues);
+            var typeDef = parser.parseType(finalTypeStr);
+
+            return buildTypeAlias(typeDef)(value);
+        };
+    }
+
+    function alias(key, typeStr) {
+        var typeDef = parser.parseType(typeStr);
+        var typeAlias = hasPlaceholder(typeStr) ? buildPartialTypeAlias(typeStr) : buildTypeAlias(typeDef);
+
+        typelog.define(key, typeAlias);
+    }
+
+    function isTypeOf(typeValue) {
+        return typeof typeValue === 'string' ?
+            typelog.isTypeOf(parser.parseType(typeValue)) :
+            typeValue;
+    }
+
+    function addImmutableProperty(obj, key, value) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            writeable: false
+        });
+
+        return obj;
+    }
+
+    function attachSignatureAssembler(fn, signatureTree) {
+        addImmutableProperty(fn, 'signatureTree', signatureTree);
+
+        Object.defineProperty(fn, 'signature', {
+            writeable: false,
+            get: function () {
+                return assembler.assembleSignature(fn.signatureTree);
+            }
+        });
+
+        return fn;
+    }
+
+    function throwOnSignatureError(signatureTree, fn) {
+        var signatureCheckResult = checker.checkSignature(signatureTree);
+        var lastIndex = signatureTree.length - 1;
+
+        if (signatureTree.length < 2) {
+            throw new SyntaxError('Signature must have both input and output types');
+        }
+
+        if (signatureTree[0].length < fn.length) {
+            throw new Error('Signature declaration too short for function with ' + fn.length + ' arguments.');
+        }
+
+        if (signatureTree[lastIndex].length > 1) {
+            throw new SyntaxError('Signature can only have a single output type');
+        }
+
+        if (signatureCheckResult !== null) {
+            var invalidTypes = signatureCheckResult.map(assembler.assembleType);
+            throw new TypeError("Signature contains invalid types: " + invalidTypes.join(', '));
+        }
+    }
+
+    function signFn(signatureTree, fn) {
+        attachSignatureAssembler(fn, signatureTree);
+        return addImmutableProperty(fn, 'signatureTree', signatureTree);
+    }
+
+    function sign(signature, fn) {
+        var signatureTree = parser.parseSignature(signature);
+
+        throwOnSignatureError(signatureTree, fn);
+
+        return signFn(signatureTree, fn);
+    }
+
+    function last(list) {
+        return list[list.length - 1];
+    }
+
+    function throwEvaluationError(valueInfo, prefixMixin, functionName) {
+        var valueType = typeof valueInfo[1];
+
+        var errorMessage = functionName + ' expected a ' + prefixMixin + 'value of type ' +
+            valueInfo[0] + ' but got ' +
+            valueInfo[1] + ' of type ' + valueType;
+
+        throw new TypeError(errorMessage);
+    }
+
+    var functionTypeDef = parser.parseType('function');
+
+    function verify(fn, args) {
+        var result = validator.validateArguments(fn.signatureTree[0])(args);
+
+        if (result !== null) {
+            throwEvaluationError(result, '');
+        }
+    }
+
+    function throwInputError(validationResult, inputErrorBuilder, args, signatureTree, functionName) {
+        if (typeof inputErrorBuilder === 'function') {
+            throw new Error(inputErrorBuilder(validationResult, args, signatureTree, functionName));
+        } else {
+            throwEvaluationError(validationResult, '', functionName);
+        }
+    }
+
+    function throwOutputError(validationResult, outputErrorBuilder, args, signatureTree, functionName) {
+        if (typeof outputErrorBuilder === 'function') {
+            throw new Error(outputErrorBuilder(validationResult, args, signatureTree, functionName));
+        } else {
+            throwEvaluationError(validationResult, 'return ', functionName);
+        }
+    }
+
+    function getFunctionName(fn) {
+        return fn.name === '' ? 'Anonymous' : fn.name;
+    }
+
+    function buildEnforcer(signatureTree, fn, options) {
+        var functionName = getFunctionName(fn);
+        return function () {
+            var args = Array.prototype.slice.call(arguments, 0);
+            var validationResult = validator.validateArguments(signatureTree[0])(args);
+
+            if (validationResult !== null) {
+                throwInputError(validationResult, options.inputErrorBuilder, args, signatureTree, functionName);
+            }
+
+            var signatureIsCurried = signatureTree.length > 2;
+            var returnType = !signatureIsCurried ? last(signatureTree)[0] : functionTypeDef;
+            var returnTypeStr = assembler.assembleType(returnType);
+
+            var result = fn.apply(this, args);
+
+            if (!validator.validateType(returnType)(result)) {
+                throwOutputError([returnTypeStr, result], options.outputErrorBuilder, args, signatureTree, functionName);
+            }
+
+            return !signatureIsCurried ? result : enforceOnTree(signatureTree.slice(1), result, options);
+        };
+    }
+
+    function buildArgNames(argCount) {
+        var startChar = 'a'.charCodeAt(0);
+        var argNames = [];
+
+        for (var i = 0; i < argCount; i++) {
+            argNames.push(String.fromCharCode(startChar + i));
+        }
+
+        return argNames.join(', ');
+    }
+
+    function buildEnforceDecorator(enforcer) {
+        return function enforceDecorator(args) {
+            var args = Array.prototype.slice.call(arguments, 0);
+            return enforcer.apply(this, args);
+        }
+    }
+
+    function enforceOnTree(signatureTree, fn, options) {
+        var enforcer = buildEnforcer(signatureTree, fn, options);
+        var argNames = buildArgNames(fn.length);
+        var enforceDecorator = buildEnforceDecorator(enforcer);
+
+        enforceDecorator.toString = Function.prototype.toString.bind(fn);
+
+        return signFn(signatureTree, enforceDecorator);
+    }
+
+    function addTypeCheck(typeDef) {
+        typeDef.typeCheck = typelog.isTypeOf(typeDef);
+        return typeDef;
+    }
+
+    function prepareSubtree(subtree) {
+        var updatedSubtree = subtree.map(addTypeCheck);
+        updatedSubtree.dependent = subtree.dependent;
+        return updatedSubtree;
+    }
+
+    function prepareSignature(signatureTree) {
+        return signatureTree.map(prepareSubtree);
+    }
+
+    function enforce(signature, fn, options) {
+        var signatureTree = prepareSignature(parser.parseSignature(signature));
+        var cleanOptions = typeof options === 'object' && options !== null ? options : {};
+        return enforceOnTree(signatureTree, fn, cleanOptions);
+    }
+
+    function attachPreprocessor(typeCheck, preprocessor) {
+        if (typeof preprocessor === 'function') {
+            typeCheck.preprocess = preprocessor;
+        }
+    }
+
+    function extend(typeName, typeCheck, preprocessor) {
+        attachPreprocessor(typeCheck, preprocessor);
+        typelog.define(typeName, typeCheck);
+    }
+
+    function subtype(parentTypeName) {
+        var defineSubtype = typelog.defineSubtypeOf(parentTypeName);
+
+        return function (typeName, typeCheck, preprocessor) {
+            attachPreprocessor(typeCheck, preprocessor);
+            defineSubtype(typeName, typeCheck);
+        };
+    }
+
+    var typeApi = coreTypes(
+        parser,
+        extend,
+        isTypeOf,
+        typelog.isType,
+        typelog.isSubtypeOf,
+        subtype,
+        alias,
+        typelog.defineDependentOperatorOn);
+
+    return {
+        alias: enforce(
+            'aliasName != typeString :: aliasName:string, typeString:string => undefined',
+            alias),
+        duckTypeFactory: enforce(
+            'duckTypeDef:object => function',
+            duckTypesModule.duckTypeFactory),
+        defineDuckType: enforce(
+            'typeName:string, duckTypeDef:object => undefined',
+            duckTypesModule.defineDuckType),
+        defineDependentOperatorOn: enforce(
+            'typeName:string => operator:string, operatorCheck:function => undefined',
+            typelog.defineDependentOperatorOn),
+        enforce: enforce(
+            'signature:string, functionToEnforce:function, options:[object] => function',
+            enforce),
+        extend: enforce(
+            'typeName:string, typeCheck:function, preprocessor:[function] => undefined',
+            extend),
+        isSubtypeOf: enforce(
+            'rootTypeName:string => typeNameUnderTest:string => boolean',
+            typelog.isSubtypeOf),
+        isType: enforce(
+            'typeName:string => boolean',
+            typelog.isType),
+        isTypeOf: enforce(
+            'typeToCheck:type => value:* => boolean',
+            isTypeOf),
+        registerTypeLevelMacro: enforce(
+            'macro:function => undefined',
+            parser.registerTypeLevelMacro),
+        reportDuckTypeErrors: enforce(
+            'duckTypeName:string => \
+            valueToCheck:object => \
+            array<tuple<string, string; *>>',
+            duckTypesModule.reportDuckTypeErrors),
+        sign: enforce(
+            'signature:string, functionToSign:function => function',
+            sign),
+        subtype: enforce(
+            'rootTypeName:string => \
+            subtypeName:string, subtypeCheck:function, preprocessor:[function] => \
+            undefined',
+            subtype),
+        typeChain: enforce(
+            'typeName:string => string',
+            typelog.getTypeChain),
+        verify: enforce(
+            'signedFunctionToVerify:function, functionArguments:arguments => undefined',
+            verify),
+        whichType: enforce(
+            'typeNames:array<string> => value:* => variant<string, null>',
+            typeApi.whichType),
+        whichVariantType: enforce(
+            'variantString:string => value:* => variant<string, null>',
+            typeApi.whichVariantType)
     };
 }
 
@@ -1267,6 +1465,7 @@ var signet = (function () {
         var typelog = signetTypelog(registrar, parser);
         var validator = signetValidator(typelog, assembler);
         var duckTypes = signetDuckTypes;
+        var coreTypes = signetCoreTypes;
 
         return signetBuilder(
             typelog, 
@@ -1274,7 +1473,8 @@ var signet = (function () {
             checker, 
             parser, 
             assembler, 
-            duckTypes);
+            duckTypes,
+            coreTypes);
     }
 
     if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
@@ -1377,15 +1577,33 @@ function moxandriaFactory(
             }
         }
 
+        function buildSetCallOnComplete(callOnComplete) {
+            return function setCallOnComplete (action) {
+                callOnComplete.action = action;
+            }
+        }
+
+        function buildCallCompleteAction(callOnComplete) {
+            return function callCompleteAction () {
+                callOnComplete.action();
+            }
+        }
+
         function attachDataMethods(mockObj, mockApi) {
             function attachDataMethods(key) {
                 var functionResponseData = [];
+                var callOnComplete = { action: function () {} };
                 var pushAction = buildDataPushAction(functionResponseData);
                 var shiftAction = buildDataShiftAction(functionResponseData);
 
-
                 mockObj[key + 'EnqueueData'] = signet.enforce('array => undefined', pushAction);
                 mockApi[key + 'DequeueData'] = signet.enforce('() => array', shiftAction);
+                
+                var setCallOnComplete = buildSetCallOnComplete(callOnComplete);
+                var callCompleteAction = buildCallCompleteAction(callOnComplete);
+
+                mockObj[key + 'SetCallOnCompleteAction'] = signet.enforce('function => undefined', setCallOnComplete);
+                mockApi[key + 'CallCompleteAction'] = signet.enforce('() => function', callCompleteAction);
             }
 
             applyForMockFunctions(mockObj, attachDataMethods)

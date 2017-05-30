@@ -54,15 +54,33 @@ function moxandriaFactory(
             }
         }
 
+        function buildSetCallOnComplete(callOnComplete) {
+            return function setCallOnComplete (action) {
+                callOnComplete.action = action;
+            }
+        }
+
+        function buildCallCompleteAction(callOnComplete) {
+            return function callCompleteAction () {
+                callOnComplete.action();
+            }
+        }
+
         function attachDataMethods(mockObj, mockApi) {
             function attachDataMethods(key) {
                 var functionResponseData = [];
+                var callOnComplete = { action: function () {} };
                 var pushAction = buildDataPushAction(functionResponseData);
                 var shiftAction = buildDataShiftAction(functionResponseData);
 
-
                 mockObj[key + 'EnqueueData'] = signet.enforce('array => undefined', pushAction);
                 mockApi[key + 'DequeueData'] = signet.enforce('() => array', shiftAction);
+                
+                var setCallOnComplete = buildSetCallOnComplete(callOnComplete);
+                var callCompleteAction = buildCallCompleteAction(callOnComplete);
+
+                mockObj[key + 'SetCallOnCompleteAction'] = signet.enforce('function => undefined', setCallOnComplete);
+                mockApi[key + 'CallCompleteAction'] = signet.enforce('() => function', callCompleteAction);
             }
 
             applyForMockFunctions(mockObj, attachDataMethods)

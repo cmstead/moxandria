@@ -4,7 +4,10 @@ function filesystemTestMock (mockApi) {
             var callbackData = mockApi.fsTestMock1DequeueData();
             callback.apply(null, callbackData);
         },
-        fsTestMock2: function () {}
+        fsTestMock2: function () {
+            var callOnComplete = mockApi.fsTestMock2CallCompleteAction();
+            callOnComplete();
+        }
     };
 }
 

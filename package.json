@@ -1,6 +1,6 @@
 {
   "name": "moxandria",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A clean, simple mock centralization and facilitation library for Javascript testing",
   "main": "index.js",
   "scripts": {
@@ -23,7 +23,7 @@
   },
   "homepage": "https://github.com/cmstead/moxandria#readme",
   "dependencies": {
-    "signet": "^3.0.0",
+    "signet": "^3.7.0",
     "sinon": "^2.2.0"
   },
   "devDependencies": {

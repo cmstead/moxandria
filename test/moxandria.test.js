@@ -53,7 +53,12 @@ describe('Moxandria core', function () {
                 }
             }
 
+            function functionMockFactory (mockApi) {
+                return function () {};
+            }
+
             moxandria.registerMock('testMock', sideloadMockFactory);
+            moxandria.registerMock('testFunctionMock', functionMockFactory);
             testMock = moxandria.buildMock('testMock');
         });
 
@@ -63,6 +68,10 @@ describe('Moxandria core', function () {
 
         it('should throw an error if user tries to double-register on a single key', function () {
             assert.throws(moxandria.registerMock.bind(null, 'testMock', sideloadMockFactory));
+        });
+
+        it('should not blow up when loading a function-returning mock', function () {
+            this.verify(moxandria.buildMock('testFunctionMock').toString());
         });
 
         it('should register a spy on mocked endpoints', function () {
@@ -95,6 +104,17 @@ describe('Moxandria core', function () {
             let filesystemTestMock = moxandria.buildMock('filesystemTestMock');
             filesystemTestMock.fsTestMock1EnqueueData([null, 'something']);
             this.verify(prettyJson(filesystemTestMock));
+        });
+
+        it('should allow definition for call on complete action', function (done) {
+            let callOnCompleteSpy = sinon.spy;
+            let filesystemTestMock = moxandria.buildMock('filesystemTestMock');
+            
+            filesystemTestMock.fsTestMock2SetCallOnCompleteAction(function () {
+                assert.equal(true, true);
+                done();
+            });
+            filesystemTestMock.fsTestMock2();
         });
 
     });
