@@ -738,7 +738,7 @@ function signetDuckTypes(typelog, isTypeOf) {
     }
 
     function getErrorValue(value, typeName) {
-        if(typeof duckTypeErrorReporters[typeName] === 'function') {
+        if (typeof duckTypeErrorReporters[typeName] === 'function') {
             return duckTypeErrorReporters[typeName](value);
         }
 
@@ -784,7 +784,7 @@ function signetDuckTypes(typelog, isTypeOf) {
     function reportDuckTypeErrors(typeName) {
         var errorChecker = duckTypeErrorReporters[typeName];
 
-        if(typeof errorChecker === 'undefined') {
+        if (typeof errorChecker === 'undefined') {
             throw new Error('No duck type "' + typeName + '" exists.');
         }
 
@@ -793,10 +793,28 @@ function signetDuckTypes(typelog, isTypeOf) {
         }
     }
 
+    function exactDuckTypeFactory(objectDef) {
+        var propertyLength = Object.keys(objectDef).length;
+        var duckType = duckTypeFactory(objectDef);
+        return function (value) {
+            return propertyLength === Object.keys(value).length && duckType(value);
+        };
+    }
+
+    function defineExactDuckType(typeName, objectDef) {
+        var definitionPairs = buildDefinitionPairs(objectDef);
+
+        typelog.defineSubtypeOf('object')(typeName, exactDuckTypeFactory(objectDef));
+        duckTypeErrorReporters[typeName] = buildDuckTypeErrorReporter(definitionPairs, objectDef);
+
+    }
+
     return {
         buildDuckTypeErrorChecker: buildDuckTypeErrorReporter,
         defineDuckType: defineDuckType,
+        defineExactDuckType: defineExactDuckType,
         duckTypeFactory: duckTypeFactory,
+        exactDuckTypeFactory: exactDuckTypeFactory,
         reportDuckTypeErrors: reportDuckTypeErrors
     };
 }
@@ -933,12 +951,8 @@ function signetCoreTypes(
     }
 
 
-    function rangeBuilder() {
-        function checkRange(value, range) {
-            return range.min <= value && value <= range.max;
-        }
-
-        return checkRange;
+    function checkRange(value, range) {
+        return range.min <= value && value <= range.max;
     }
 
     function optionsToRangeObject(options) {
@@ -962,6 +976,10 @@ function signetCoreTypes(
 
     function optionsToFunctions(options) {
         return options.map(isTypeOf);
+    }
+
+    function optionsToFunction(options) {
+        return options.join(', ');
     }
 
     function checkArgumentsObject(value) {
@@ -1048,12 +1066,33 @@ function signetCoreTypes(
         return isVariant(value, options);
     }
 
+    function checkCompositeType(value, typePredicates) {
+        return typePredicates.reduce(function (result, predicate) {
+            return result && predicate(value);
+        }, true);
+    }
+
+    function checkNot(value, typePredicates) {
+        return !typePredicates[0](value);
+    }
+
     var starTypeDef = parser.parseType('*');
 
     function isRegisteredType(value) {
         return typeof value === 'function' || isSignetType(parser.parseType(value).type);
     }
 
+    function equalLength(a, b) {
+        return a.length === b.length;
+    }
+
+    function longer(a, b) {
+        return a.length > b.length;
+    }
+
+    function shorter(a, b) {
+        return a.length < b.length;
+    }
 
     parser.registerTypeLevelMacro(function emptyParamsToStar(value) {
         return /^\(\s*\)$/.test(value.trim()) ? '*' : value;
@@ -1066,39 +1105,42 @@ function signetCoreTypes(
         return signatureMatch ? value.replace(signaturePattern, 'function<$2>') : value;
     });
 
-    extend('boolean', isType('boolean'));
-    extend('function', isType('function'));
-    extend('number', isType('number'));
-    extend('object', isType('object'));
-    extend('string', isType('string'));
-    extend('symbol', isType('symbol'));
-    extend('undefined', isType('undefined'));
-    extend('null', isNull);
-    extend('variant', isVariant, optionsToFunctions);
-    extend('taggedUnion', checkTaggedUnion, optionsToFunctions);
+    extend('boolean{0}', isType('boolean'));
+    extend('function{0,1}', isType('function'), optionsToFunction);
+    extend('number{0}', isType('number'));
+    extend('object{0}', isType('object'));
+    extend('string{0}', isType('string'));
+    extend('symbol{0}', isType('symbol'));
+    extend('undefined{0}', isType('undefined'));
+    extend('not{1}', checkNot, optionsToFunctions);
+    extend('null{0}', isNull);
+    extend('variant{1,}', isVariant, optionsToFunctions);
+    extend('taggedUnion{1,}', checkTaggedUnion, optionsToFunctions);
+    extend('composite{1,}', checkCompositeType, optionsToFunctions);
 
-    subtype('object')('array', checkArray);
-    subtype('object')('regexp', isRegExp);
-    subtype('number')('int', checkInt);
-    subtype('number')('bounded', rangeBuilder(), optionsToRangeObject);
-    subtype('int')('boundedInt', rangeBuilder(), optionsToRangeObject);
-    subtype('string')('boundedString', checkBoundedString, optionsToRangeObject);
-    subtype('string')('formattedString', checkFormattedString, optionsToRegex);
-    subtype('array')('tuple', checkTuple, optionsToFunctions);
-    subtype('array')('unorderedProduct', isUnorderedProduct);
-    subtype('object')('arguments', checkArgumentsObject);
+    subtype('object')('array{0,}', checkArray);
+    subtype('object')('regexp{0}', isRegExp);
+    subtype('number')('int{0}', checkInt);
+    subtype('number')('bounded{2}', checkRange, optionsToRangeObject);
+    subtype('string')('boundedString{2}', checkBoundedString, optionsToRangeObject);
+    subtype('string')('formattedString{1}', checkFormattedString, optionsToRegex);
+    subtype('array')('tuple{1,}', checkTuple, optionsToFunctions);
+    subtype('array')('unorderedProduct{1,}', isUnorderedProduct);
+    subtype('object')('arguments{0}', checkArgumentsObject);
 
-    alias('typeValue', 'variant<string, function>');
-    subtype('typeValue')('type', isRegisteredType);
+    alias('typeValue{0}', 'variant<string, function>');
+    subtype('typeValue')('type{0}', isRegisteredType);
 
-    alias('any', '*');
-    alias('void', '*');
+    alias('any{0}', '*');
+    alias('void{0}', '*');
 
-    alias('leftBounded', 'bounded<_, Infinity>');
-    alias('rightBounded', 'bounded<-Infinity, _>');
-    
-    alias('leftBoundedInt', 'bounded<_, Infinity>');
-    alias('rightBoundedInt', 'bounded<-Infinity, _>');
+    alias('leftBounded{1}', 'bounded<_, Infinity>');
+    alias('rightBounded{1}', 'bounded<-Infinity, _>');
+
+    alias('boundedInt{2}', 'composite<int, bounded<_, _>>')
+
+    alias('leftBoundedInt{1}', 'boundedInt<_, Infinity>');
+    alias('rightBoundedInt{1}', 'boundedInt<-Infinity, _>');
 
     defineDependentOperatorOn('number')('>', greater);
     defineDependentOperatorOn('number')('<', less);
@@ -1109,6 +1151,13 @@ function signetCoreTypes(
 
     defineDependentOperatorOn('string')('=', equal);
     defineDependentOperatorOn('string')('!=', not(equal));
+    defineDependentOperatorOn('string')('#=', equalLength);
+    defineDependentOperatorOn('string')('#<', shorter);
+    defineDependentOperatorOn('string')('#>', longer);
+
+    defineDependentOperatorOn('array')('#=', equalLength);
+    defineDependentOperatorOn('array')('#<', shorter);
+    defineDependentOperatorOn('array')('#>', longer);
 
     defineDependentOperatorOn('object')('=', objectsAreEqual);
     defineDependentOperatorOn('object')('!=', not(objectsAreEqual));
@@ -1178,7 +1227,7 @@ function signetBuilder(
         var typeDef = parser.parseType(typeStr);
         var typeAlias = hasPlaceholder(typeStr) ? buildPartialTypeAlias(typeStr) : buildTypeAlias(typeDef);
 
-        typelog.define(key, typeAlias);
+        extend(key, typeAlias);
     }
 
     function isTypeOf(typeValue) {
@@ -1367,17 +1416,75 @@ function signetBuilder(
         }
     }
 
-    function extend(typeName, typeCheck, preprocessor) {
-        attachPreprocessor(typeCheck, preprocessor);
-        typelog.define(typeName, typeCheck);
+    var typeArityPattern = /^([^\{]+)\{([^\}]+)\}$/;
+
+    function getArity(typeName, typeStr) {
+        var arityStr = typeStr.replace(typeArityPattern, '$2');
+        var arityData = arityStr.split(/\,\s*/g);
+        var min = 0;
+        var max = Infinity;
+
+        if (arityStr !== typeStr) {
+            min = parseInt(arityData[0]);
+            max = arityData.length === 1 ? min : parseInt(arityData[1]);
+
+            if (min > max) {
+                throw new Error('Error in ' + typeName + ' arity declaration: min cannot be greater than max');
+            }
+
+            min = isNaN(min) || min < 0 ? 0 : min;
+            max = isNaN(max) || max < 0 ? Infinity : max;
+        }
+
+        return [min, max];
+    }
+
+    function getTypeName(typeStr) {
+        return typeStr.replace(typeArityPattern, '$1').trim();
+    }
+
+    function checkTypeArity(typeName, arity, options) {
+        var optionsIsArray = Object.prototype.toString.call(options) === '[object Array]';
+        var errorMessage = null;
+
+        if (optionsIsArray && options.length < arity[0]) {
+            errorMessage = 'Type ' + typeName + ' requires, at least, ' + arity[0] + ' arguments';
+        } else if (optionsIsArray && options.length > arity[1]) {
+            errorMessage = 'Type ' + typeName + ' accepts, at most, ' + arity[1] + ' arguments';
+        }
+
+        if (errorMessage !== null) {
+            throw new Error(errorMessage);
+        }
+    }
+
+    function decorateWithArityCheck(typeName, typeArity, typeCheck) {
+        return function decoratedTypeCheck(value, options) {
+            checkTypeArity(typeName, typeArity, options);
+
+            return typeCheck(value, options);
+        }
+    }
+
+    function extend(typeStr, typeCheck, preprocessor) {
+        var typeName = getTypeName(typeStr);
+        var typeArity = getArity(typeName, typeStr);
+        var decoratedTypeCheck = decorateWithArityCheck(typeName, typeArity, typeCheck);
+
+        attachPreprocessor(decoratedTypeCheck, preprocessor);
+        typelog.define(typeName, decoratedTypeCheck);
     }
 
     function subtype(parentTypeName) {
         var defineSubtype = typelog.defineSubtypeOf(parentTypeName);
 
-        return function (typeName, typeCheck, preprocessor) {
-            attachPreprocessor(typeCheck, preprocessor);
-            defineSubtype(typeName, typeCheck);
+        return function (typeStr, typeCheck, preprocessor) {
+            var typeName = getTypeName(typeStr);
+            var typeArity = getArity(typeName, typeStr);
+            var decoratedTypeCheck = decorateWithArityCheck(typeName, typeArity, typeCheck);
+
+            attachPreprocessor(decoratedTypeCheck, preprocessor);
+            defineSubtype(typeName, decoratedTypeCheck);
         };
     }
 
@@ -1401,14 +1508,22 @@ function signetBuilder(
         defineDuckType: enforce(
             'typeName:string, duckTypeDef:object => undefined',
             duckTypesModule.defineDuckType),
+        defineExactDuckType: enforce(
+            'typeName:string, duckTypeDef:object => undefined',
+            duckTypesModule.defineExactDuckType),
         defineDependentOperatorOn: enforce(
-            'typeName:string => operator:string, operatorCheck:function => undefined',
+            'typeName:string => \
+            operator:string, operatorCheck:function<*, *, [object], [object] => boolean> => \
+            undefined',
             typelog.defineDependentOperatorOn),
         enforce: enforce(
             'signature:string, functionToEnforce:function, options:[object] => function',
             enforce),
+        exactDuckTypeFactory: enforce(
+            'duckTypeDef:object => function',
+            duckTypesModule.exactDuckTypeFactory),
         extend: enforce(
-            'typeName:string, typeCheck:function, preprocessor:[function] => undefined',
+            'typeName:string, typeCheck:function, preprocessor:[function<string => string>] => undefined',
             extend),
         isSubtypeOf: enforce(
             'rootTypeName:string => typeNameUnderTest:string => boolean',
@@ -1425,14 +1540,14 @@ function signetBuilder(
         reportDuckTypeErrors: enforce(
             'duckTypeName:string => \
             valueToCheck:object => \
-            array<tuple<string, string; *>>',
+            array<tuple<string, string, *>>',
             duckTypesModule.reportDuckTypeErrors),
         sign: enforce(
             'signature:string, functionToSign:function => function',
             sign),
         subtype: enforce(
             'rootTypeName:string => \
-            subtypeName:string, subtypeCheck:function, preprocessor:[function] => \
+            subtypeName:string, subtypeCheck:function, preprocessor:[function<string => string>] => \
             undefined',
             subtype),
         typeChain: enforce(
