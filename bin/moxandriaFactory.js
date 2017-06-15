@@ -38,16 +38,20 @@ function moxandriaFactory(
             applyForMockFunctions(mockObj, spyOnMethod);
         }
 
-        function buildDataPushAction(functionResponseData) {
+        function buildDataPushAction(key, functionResponseData) {
             return function pushData(data) {
+                if(data.length === 0) {
+                    throw new Error('Cannot enqueue an empty data array for function ' + key);
+                }
+                
                 functionResponseData.push(data);
             }
         }
 
-        function buildDataShiftAction(functionResponseData) {
+        function buildDataShiftAction(key, functionResponseData) {
             return function shiftData() {
                 if (functionResponseData.length === 0) {
-                    throw new Error('No more data to dequeue for function calls');
+                    throw new Error('Cannot dequeue more data for function ' + key);
                 }
 
                 return functionResponseData.shift();
@@ -70,8 +74,8 @@ function moxandriaFactory(
             function attachDataMethods(key) {
                 var functionResponseData = [];
                 var callOnComplete = { action: function () {} };
-                var pushAction = buildDataPushAction(functionResponseData);
-                var shiftAction = buildDataShiftAction(functionResponseData);
+                var pushAction = buildDataPushAction(key, functionResponseData);
+                var shiftAction = buildDataShiftAction(key, functionResponseData);
 
                 mockObj[key + 'EnqueueData'] = signet.enforce('array => undefined', pushAction);
                 mockApi[key + 'DequeueData'] = signet.enforce('() => array', shiftAction);

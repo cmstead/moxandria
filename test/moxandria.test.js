@@ -1,15 +1,15 @@
 'use strict';
 
-require('./test-utils/approvals-config');
 
 const assert = require('chai').assert;
 const prettyJson = require('./test-utils/prettyJson');
 const sinon = require('sinon');
 
-// const moxandriaFactory = require('../dist/moxandria.js');
-const moxandriaFactory = require('../index.js');
+const moxandriaFactory = require('../dist/moxandria.js');
+// const moxandriaFactory = require('../index.js');
 
 describe('Moxandria core', function () {
+    require('./test-utils/approvals-config');
 
     it('should be a factory', function () {
         let moxandria = moxandriaFactory();
@@ -26,7 +26,7 @@ describe('Moxandria core', function () {
 
         let moxandria = moxandriaFactory(config);
 
-        this.verify(prettyJson(moxandria.getConfig()));
+        verify(this, prettyJson(moxandria.getConfig()));
     });
 
     describe('Moxandria instance', function () {
@@ -53,8 +53,8 @@ describe('Moxandria core', function () {
                 }
             }
 
-            function functionMockFactory (mockApi) {
-                return function () {};
+            function functionMockFactory() {
+                return function () { };
             }
 
             moxandria.registerMock('testMock', sideloadMockFactory);
@@ -63,7 +63,7 @@ describe('Moxandria core', function () {
         });
 
         it('should allow manual registration of mock factories', function () {
-            this.verify(prettyJson(moxandria.buildMock('testMock')));
+            verify(this, prettyJson(moxandria.buildMock('testMock')));
         });
 
         it('should throw an error if user tries to double-register on a single key', function () {
@@ -71,7 +71,7 @@ describe('Moxandria core', function () {
         });
 
         it('should not blow up when loading a function-returning mock', function () {
-            this.verify(moxandria.buildMock('testFunctionMock').toString());
+            verify(this, moxandria.buildMock('testFunctionMock').toString());
         });
 
         it('should register a spy on mocked endpoints', function () {
@@ -85,7 +85,7 @@ describe('Moxandria core', function () {
                 'Test Endpoint 2 args: \n' +
                 prettyJson(testMock.testEndpoint2.args) + '\n';
 
-            this.verify(result);
+            verify(this, result);
         });
 
         it('should call callback with provided data', function () {
@@ -97,19 +97,18 @@ describe('Moxandria core', function () {
             testMock.testEndpoint1([], callbackSpy);
             testMock.testEndpoint1([], callbackSpy);
 
-            this.verify(prettyJson(callbackSpy.args));
+            verify(this, prettyJson(callbackSpy.args));
         });
 
         it('should load mock from file system if not pre-loaded', function () {
             let filesystemTestMock = moxandria.buildMock('filesystemTestMock');
             filesystemTestMock.fsTestMock1EnqueueData([null, 'something']);
-            this.verify(prettyJson(filesystemTestMock));
+            verify(this, prettyJson(filesystemTestMock));
         });
 
         it('should allow definition for call on complete action', function (done) {
-            let callOnCompleteSpy = sinon.spy;
             let filesystemTestMock = moxandria.buildMock('filesystemTestMock');
-            
+
             filesystemTestMock.fsTestMock2SetCallOnCompleteAction(function () {
                 assert.equal(true, true);
                 done();
@@ -117,6 +116,17 @@ describe('Moxandria core', function () {
             filesystemTestMock.fsTestMock2();
         });
 
+        it('should throw an error if a data queue runs out of elements', function () {
+            testMock.testEndpoint1EnqueueData(['']);
+            testMock.testEndpoint1([], () => null);
+
+            assert.throws(testMock.testEndpoint1.bind(null, [], () => null));
+        });
+
     });
 
 });
+
+if (typeof global.runQuokkaMochaBdd === 'function') {
+    runQuokkaMochaBdd();
+}
