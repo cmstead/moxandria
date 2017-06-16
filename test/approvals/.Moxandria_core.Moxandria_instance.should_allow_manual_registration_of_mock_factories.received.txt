@@ -1,0 +1,8 @@
+{
+    "testEndpoint1": "Function: proxy",
+    "testEndpoint2": "Function: proxy",
+    "testEndpoint1EnqueueData": "Function: enforceDecorator",
+    "testEndpoint1SetCallOnCompleteAction": "Function: enforceDecorator",
+    "testEndpoint2EnqueueData": "Function: enforceDecorator",
+    "testEndpoint2SetCallOnCompleteAction": "Function: enforceDecorator"
+}
