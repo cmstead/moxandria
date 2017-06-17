@@ -1,13 +1,13 @@
 'use strict';
 
+require('quokka-mocha-approvals-helper')();
+
 const approvalsLocation = './test/approvals';
-const quokkaApprovalsHelper = require('./quokkaApprovalsHelper');
 const approvalsConfigFactory = require('approvals-config-factory');
-
-quokkaApprovalsHelper();
-
 const approvalsConfig = approvalsConfigFactory.buildApprovalsConfig({ 
-    reporter: quokkaApprovalsHelper.chooseReporter('kdiff3')
+    reporter: chooseReporter('kdiff3')
 });
 
-module.exports = require('approvals').configure(approvalsConfig).mocha(approvalsLocation);
+module.exports = require('approvals')
+    .configure(approvalsConfig)
+    .mocha(approvalsLocation);
