@@ -84,7 +84,7 @@ function moxandriaFactory(
                 var callCompleteAction = buildCallCompleteAction(callOnComplete);
 
                 mockObj[key + 'SetCallOnCompleteAction'] = signet.enforce('function => undefined', setCallOnComplete);
-                mockApi[key + 'CallCompleteAction'] = signet.enforce('() => function', callCompleteAction);
+                mockApi[key + 'CallCompleteAction'] = signet.enforce('() => undefined', callCompleteAction);
             }
 
             applyForMockFunctions(mockObj, attachDataMethods)

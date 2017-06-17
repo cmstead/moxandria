@@ -71,7 +71,7 @@ describe('Moxandria core', function () {
         });
 
         it('should not blow up when loading a function-returning mock', function () {
-            verify(this, moxandria.buildMock('testFunctionMock').toString());
+            assert.equal(typeof moxandria.buildMock('testFunctionMock'), 'function');
         });
 
         it('should register a spy on mocked endpoints', function () {
@@ -113,6 +113,7 @@ describe('Moxandria core', function () {
                 assert.equal(true, true);
                 done();
             });
+
             filesystemTestMock.fsTestMock2();
         });
 
