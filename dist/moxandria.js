@@ -107,10 +107,6 @@ function signetParser() {
     var typeLevelMacros = [];
     var signatureLevelMacros = [];
 
-    function identity(value) {
-        return value;
-    }
-
     function throwOnBadMacroResult(result) {
         if (typeof result !== 'string') {
             throw new Error('Macro Error: All macros must return a string; got ' + result + ' of type ' + typeof result);
@@ -135,55 +131,6 @@ function signetParser() {
 
     function registerSignatureLevelMacro(macro) {
         signatureLevelMacros.push(macro);
-    }
-
-    function isDelimiter(symbol) {
-        return symbol === ';' || symbol === ',';
-    }
-
-    function terminateSubtype(bracketStack, currentChar) {
-        return (bracketStack.length === 1 && isDelimiter(currentChar))
-            || (currentChar === '>' && bracketStack.length === 0);
-    }
-
-    function isStructuralChar(char) {
-        return char.match(/[\<\;\s\,]/) !== null;
-    }
-
-    function captureChar(bracketStack, currentChar) {
-        return bracketStack.length > 1
-            || (bracketStack.length === 0 && currentChar === '>')
-            || (bracketStack.length > 0 && !isStructuralChar(currentChar));
-    }
-
-    function updateStack(bracketStack, currentChar) {
-        if (currentChar === '<') {
-            bracketStack.push(currentChar);
-        } else if (currentChar === '>') {
-            bracketStack.pop();
-        }
-    }
-
-    function buildAppender(bracketStack) {
-        return function (subtypeStr, currentChar) {
-            var capture = captureChar(bracketStack, currentChar);
-            return capture ? subtypeStr + currentChar : subtypeStr;
-        };
-    }
-
-    function updateSubtypeInfo(bracketStack, subtypeInfo) {
-        return function (subtypeStr, currentChar) {
-            if (terminateSubtype(bracketStack, currentChar)) {
-                subtypeInfo.push(subtypeStr);
-            }
-        }
-    }
-
-    function getUpdatedSubtypeStr(bracketStack, appendOnRule) {
-        return function (subtypeStr, currentChar) {
-            var terminate = terminateSubtype(bracketStack, currentChar);
-            return terminate ? '' : appendOnRule(subtypeStr, currentChar);
-        }
     }
 
     function getSubtypeData(typeStr) {
@@ -555,10 +502,6 @@ var signetValidator = (function () {
 
     return function (typelog, assembler, parser) {
 
-        function isObjectInstance(value) {
-            return typeof value === 'object' && value !== null;
-        }
-
         function validateOptional(typeDef, argument, typeList) {
             return typeDef.optional && (typeList.length > 1 || typeof argument === 'undefined');
         }
@@ -765,8 +708,15 @@ function signetDuckTypes(typelog, isTypeOf) {
         };
     }
 
-    function buildDuckType(definitionPairs, objectDef) {
+    var isDuckTypeCheckable = isTypeOf('composite<not<null>, variant<object, function>>')
+
+
+    function buildDuckType(definitionPairs) {
         return function (value) {
+            if(!isDuckTypeCheckable(value)) {
+                return false;
+            }
+
             return definitionPairs.reduce(function (result, typePair) {
                 var key = typePair[0];
                 var typePredicate = typePair[1];
@@ -1076,8 +1026,6 @@ function signetCoreTypes(
         return !typePredicates[0](value);
     }
 
-    var starTypeDef = parser.parseType('*');
-
     function isRegisteredType(value) {
         return typeof value === 'function' || isSignetType(parser.parseType(value).type);
     }
@@ -1096,6 +1044,38 @@ function signetCoreTypes(
 
     parser.registerTypeLevelMacro(function emptyParamsToStar(value) {
         return /^\(\s*\)$/.test(value.trim()) ? '*' : value;
+    });
+
+    function buildTypePattern(macroPattern) {
+        var token = '{{typePattern}}';
+        var typePattern = '^([^\\:]+\\:)?(\\[)?' + token + '(\\])?$';
+
+        return new RegExp(typePattern.replace(token, macroPattern));
+    }
+
+    function matchAndReplace(value, pattern, replacement){
+        return pattern.test(value) ? value.replace(pattern, replacement) : value;
+    }
+
+    parser.registerTypeLevelMacro(function bangStarDefinedValues(value) {
+        var pattern = buildTypePattern('(\\!\\*)');
+        var replacementStr = '$1$2not<variant<undefined, null>>$4';
+
+        return matchAndReplace(value.trim(), pattern, replacementStr);
+    });
+
+    parser.registerTypeLevelMacro(function questionMarkToOptionalType(value) {
+        var pattern = buildTypePattern('\\?([^\\]]*)');
+        var replacementStr = '$1$2variant<undefined, $3>$4';
+
+        return matchAndReplace(value.trim(), pattern, replacementStr);
+    });
+
+    parser.registerTypeLevelMacro(function caretToNot(value) {
+        var pattern = buildTypePattern('\\^([^\\]]*)');
+        var replacementStr = '$1$2not<$3>$4';
+
+        return matchAndReplace(value.trim(), pattern, replacementStr);
     });
 
     parser.registerSignatureLevelMacro(function signatureToFunction(value) {
@@ -1193,7 +1173,6 @@ function signetBuilder(
 
     'use strict';
 
-    var duckTypesModule = duckTypes(typelog, isTypeOf);
     var placeholderPattern = /([<\;\,]\s*)(_)(\s*[>\;\,])/;
 
     function hasPlaceholder(typeStr) {
@@ -1361,19 +1340,8 @@ function signetBuilder(
         };
     }
 
-    function buildArgNames(argCount) {
-        var startChar = 'a'.charCodeAt(0);
-        var argNames = [];
-
-        for (var i = 0; i < argCount; i++) {
-            argNames.push(String.fromCharCode(startChar + i));
-        }
-
-        return argNames.join(', ');
-    }
-
     function buildEnforceDecorator(enforcer) {
-        return function enforceDecorator(args) {
+        return function enforceDecorator() {
             var args = Array.prototype.slice.call(arguments, 0);
             return enforcer.apply(this, args);
         }
@@ -1381,7 +1349,6 @@ function signetBuilder(
 
     function enforceOnTree(signatureTree, fn, options) {
         var enforcer = buildEnforcer(signatureTree, fn, options);
-        var argNames = buildArgNames(fn.length);
         var enforceDecorator = buildEnforceDecorator(enforcer);
 
         enforceDecorator.toString = Function.prototype.toString.bind(fn);
@@ -1497,6 +1464,8 @@ function signetBuilder(
         subtype,
         alias,
         typelog.defineDependentOperatorOn);
+
+    var duckTypesModule = duckTypes(typelog, isTypeOf);
 
     return {
         alias: enforce(
