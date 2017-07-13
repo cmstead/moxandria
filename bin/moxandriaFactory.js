@@ -4,9 +4,9 @@ function moxandriaFactory(
     sinon,
     signet
 ) {
-    'use strict';
-
     return function moxandriaFactory(userConfig) {
+        'use strict';
+        
         var cleanConfig = helpers.sanitizeObject(userConfig);
 
         var config = {
@@ -40,10 +40,10 @@ function moxandriaFactory(
 
         function buildDataPushAction(key, functionResponseData) {
             return function pushData(data) {
-                if(data.length === 0) {
+                if (data.length === 0) {
                     throw new Error('Cannot enqueue an empty data array for function ' + key);
                 }
-                
+
                 functionResponseData.push(data);
             }
         }
@@ -59,13 +59,13 @@ function moxandriaFactory(
         }
 
         function buildSetCallOnComplete(callOnComplete) {
-            return function setCallOnComplete (action) {
+            return function setCallOnComplete(action) {
                 callOnComplete.action = action;
             }
         }
 
         function buildCallCompleteAction(callOnComplete) {
-            return function callCompleteAction () {
+            return function callCompleteAction() {
                 callOnComplete.action();
             }
         }
@@ -73,13 +73,13 @@ function moxandriaFactory(
         function attachDataMethods(mockObj, mockApi) {
             function attachDataMethods(key) {
                 var functionResponseData = [];
-                var callOnComplete = { action: function () {} };
+                var callOnComplete = { action: function () { } };
                 var pushAction = buildDataPushAction(key, functionResponseData);
                 var shiftAction = buildDataShiftAction(key, functionResponseData);
 
                 mockObj[key + 'EnqueueData'] = signet.enforce('array => undefined', pushAction);
                 mockApi[key + 'DequeueData'] = signet.enforce('() => array', shiftAction);
-                
+
                 var setCallOnComplete = buildSetCallOnComplete(callOnComplete);
                 var callCompleteAction = buildCallCompleteAction(callOnComplete);
 

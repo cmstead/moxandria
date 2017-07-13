@@ -95,7 +95,9 @@ describe('Moxandria core', function () {
             testMock.testEndpoint1EnqueueData([{ message: 'bad stuff happened' }, null]);
 
             testMock.testEndpoint1([], callbackSpy);
-            testMock.testEndpoint1([], callbackSpy);
+            (function myTestFn() {
+                testMock.testEndpoint1([], callbackSpy);
+            })();
 
             verify(this, prettyJson(callbackSpy.args));
         });

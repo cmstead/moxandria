@@ -38,7 +38,7 @@
   },
   "homepage": "https://github.com/cmstead/moxandria#readme",
   "dependencies": {
-    "signet": "^3.13.0",
+    "signet": "^3.16.2",
     "sinon": "^2.2.0"
   },
   "devDependencies": {
@@ -46,7 +46,6 @@
     "approvals-config-factory": "^1.0.0",
     "chai": "^3.5.0",
     "eslint": "^3.19.0",
-    "flow-bin": "^0.46.0",
     "gulp": "^3.9.1",
     "gulp-concat": "^2.6.1",
     "gulp-eslint": "^3.0.1",
